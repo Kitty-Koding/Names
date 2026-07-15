@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Work In Progress</title>
+    <style>
+        body{
+            font-family: Arial, sans-serif;
+            margin: 1vw;
+        }
+        svg{
+            border: 1px solid #ccc;
+        }
+        .axis path,
+        .axis line {
+            fill: none;
+            stroke: #000;
+            shape-rendering: crispEdges;
+        }
+
+        .axis text {
+            fill: #000;
+        }
+    </style>
+    <script src="https://d3js.org/d3.v4.min.js"></script>
+</head>
+<body>
+    <h1>Name Analysis Tool</h1>
+    <input type="text" id="nameInput" placeholder="Enter a name">
+    <select id="genderSelect">
+        <option value="M">Male</option>
+        <option value="F">Female</option>
+    </select>
+    <button id="submitBtn">Submit</button>
+    <h3>Chart showing <span id="nameDisplay">Mary</span>, <span id="genderDisplay">F</span></h3>
+    <div id="chart"></div>
+    <script>
+        var name = "Mary";
+        var gender = "F";
+        var chartContainer = d3.select("#chart");
+        var svg = null;
+        var chartGroup = null;
+
+        document.getElementById("submitBtn").addEventListener("click", function() {
+            name = document.getElementById("nameInput").value;
+            gender = document.getElementById("genderSelect").value;
+            document.getElementById("nameDisplay").textContent = name;
+            document.getElementById("genderDisplay").textContent = gender;
+            drawChart();
+        });
+
+        var drawChart = function(){
+        var margin = {top: 20, right: 20, bottom: 40, left: 50},
+            width = 900 - margin.left - margin.right,
+            height = 400 - margin.top - margin.bottom;
+
+        if (!svg) {
+            svg = chartContainer.append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom);
+            chartGroup = svg.append("g")
+                .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+        }
+        
+        var dataset = null;
+
+        d3.json("./ssa_names_1880_2025.json", function(error, data) {
+            if (error) {
+                console.error("JSON load failed", error);
+                return;
+            }
+
+            for (var i = 0; i < data.data.length; i++) {
+                if (data.data[i].n === name && data.data[i].g === gender) {
+                    dataset = data.data[i];
+                    break;
+                }
+            }
+
+            if (!dataset) {
+                console.log("No data found for " + name + " (" + gender + ")");
+                return;
+            }
+
+            var x = d3.scaleLinear().domain([1880, 2025]).range([0, width]);
+            var y = d3.scaleLinear().domain([0, d3.max(dataset.a)]).range([height, 0]);
+
+            var xAxis = d3.axisBottom(x).tickFormat(d3.format("d"));
+            var yAxis = d3.axisLeft(y);
+
+            var xAxisGroup = chartGroup.select(".x.axis");
+            if (xAxisGroup.empty()) {
+                xAxisGroup = chartGroup.append("g").attr("class", "x axis");
+            }
+            xAxisGroup
+                .attr("transform", "translate(0," + height + ")")
+                .call(xAxis);
+
+            var yAxisGroup = chartGroup.select(".y.axis");
+            if (yAxisGroup.empty()) {
+                yAxisGroup = chartGroup.append("g").attr("class", "y axis");
+            }
+            yAxisGroup.call(yAxis);
+            
+            var line = d3.line().x(function(d,i) { return x(1880 + i); }).y(function(d) { return y(d); });
+            var path = chartGroup.select("path.line-path");
+            var previousPathData = path.empty() ? null : path.attr("d");
+            var nextPathData = line(dataset.a);
+
+            chartGroup.selectAll(".hover-line").remove();
+            chartGroup.select("rect.chart-overlay").remove();
+
+            if (path.empty()) {
+                path = chartGroup.append("path")
+                    .attr("class", "line-path")
+                    .attr("fill", "none")
+                    .attr("stroke", "steelblue")
+                    .attr("stroke-width", 2);
+            }
+
+            if (previousPathData) {
+                path.transition()
+                    .duration(800)
+                    .attrTween("d", function() {
+                        var interpolator = typeof d3.interpolatePath === "function"
+                            ? d3.interpolatePath(previousPathData, nextPathData)
+                            : d3.interpolateString(previousPathData, nextPathData);
+                        return function(t) {
+                            return interpolator(t);
+                        };
+                    });
+            } else {
+                path.attr("d", nextPathData);
+            }
+            var hoverLine = chartGroup.append("line")
+                .attr("class", "hover-line")
+                .attr("stroke", "#bbb")
+                .attr("stroke-width", 1)
+                .attr("visibility", "hidden");
+
+            var hoverCircle = chartGroup.append("circle")
+                .attr("class", "hover-line")
+                .attr("r", 4)
+                .attr("fill", "Steelblue")
+                .attr("visibility", "hidden");
+
+            var hoverBox = chartGroup.append("rect")
+                .attr("class", "hover-line")
+                .attr("x", 0)
+                .attr("y", 0)
+                .attr("width", 70)
+                .attr("height", 20)
+                .attr("fill", "#fff")
+                .attr("visibility", "hidden");
+
+            var hoverText = chartGroup.append("text")
+                .attr("class", "hover-line")
+                .attr("fill", "#000")
+                .attr("font-size", "12px")
+                .attr("font-family", "Trebuchet MS, sans-serif")
+                .attr("visibility", "hidden");
+
+            chartGroup.append("rect")
+                .attr("class", "chart-overlay")
+                .attr("width", width)
+                .attr("height", height)
+                .style("fill", "none")
+                .style("pointer-events", "all")
+                .on("mousemove", function() {
+                    var mouse = d3.mouse(this);
+                    var mouseX = mouse[0];
+                    var year = Math.round(x.invert(mouseX));
+                    if (year < 1880 || year > 2025) return;
+                    var index = year - 1880;
+                    var count = dataset.a[index];
+
+                    hoverLine
+                        .attr("x1", x(year))
+                        .attr("x2", x(year))
+                        .attr("y1", 0)
+                        .attr("y2", height)
+                        .attr("visibility", "visible");
+
+                    hoverCircle
+                        .attr("cx", x(year))
+                        .attr("cy", y(count))
+                        .attr("visibility", "visible");
+
+                    var boxX = x(year) + 5;
+                    var boxY = y(count) - 25;
+                    if (boxX + 70 > width) {
+                        boxX = x(year) - 75;
+                    }
+
+                    hoverBox
+                        .attr("x", boxX)
+                        .attr("y", boxY)
+                        .attr("visibility", "visible");
+
+                    var tooltipText = year + ": " + (count > 0 ? count : "<5");
+                    hoverText
+                        .attr("x", boxX + 5)
+                        .attr("y", boxY + 14)
+                        .text(tooltipText)
+                        .attr("visibility", "visible");
+                })
+                .on("mouseleave", function() {
+                    hoverLine.attr("visibility", "hidden");
+                    hoverCircle.attr("visibility", "hidden");
+                    hoverBox.attr("visibility", "hidden");
+                    hoverText.attr("visibility", "hidden");
+                });
+        });
+
+    };
+    drawChart();
+
+    </script>
+</body>
+</html>
